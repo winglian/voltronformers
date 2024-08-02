@@ -6,6 +6,7 @@ dependencies = [
     "accelerate",
     "addict",
     "bitnet",
+    "click",
     "schedulefree",
     "bitsandbytes",
     "datasets",

@@ -90,11 +90,7 @@ class Trainer:
 
     def save_checkpoint(self):
         output_dir = self.args.output_dir if self.args.output_dir is not None else "."
-        save_model(self._model, os.path.join(output_dir, f"model_{self.global_step}.safetensors"))
-        torch.save(
-            self._model.state_dict(),
-            os.path.join(output_dir, f"model_{self.global_step}.pt"),
-        )
+        self.accelerator.save_model(self._model, output_dir)
 
     def train(self):
         self._model.train()
@@ -236,8 +232,6 @@ def main():
     os.makedirs(args.output_dir, exist_ok=True)
 
     model = CausalLM(config)
-    # model = model.to(device_get_cuda())
-    # tokenizer = AutoTokenizer.from_pretrained("databricks/dbrx-base")
     tokenizer = AutoTokenizer.from_pretrained("mistralai/Mistral-7B-v0.1")
     if not tokenizer.pad_token_id:
         tokenizer.pad_token_id = tokenizer.eos_token_id

@@ -57,8 +57,8 @@ class CompressiveMemory(nn.Module):
 
         n_seq, rem = divmod(seq_len, self.segment_len)
 
-        if rem != 0:
-            raise ValueError(f"Sequence length must be divisible by segment length. seq_len: {seq_len} segment_len: {self.segment_len}")
+        # if rem != 0:
+        #     raise ValueError(f"Sequence length must be divisible by segment length. seq_len: {seq_len} segment_len: {self.segment_len}")
 
         out = []
 
@@ -67,17 +67,18 @@ class CompressiveMemory(nn.Module):
         mem = torch.zeros(1, self.num_heads, self.dim_key, self.dim_value).to(device=x.device)
         z = torch.zeros(1, self.num_heads, self.dim_value, 1).repeat(batch_size, 1, 1, 1).to(device=x.device)
 
-        for ix in range(n_seq):
-            ix_lo = ix * self.segment_len
-            ix_hi = ix_lo + self.segment_len
+        segments = torch.tensor_split(
+            x,
+            list(range(self.segment_len, seq_len, self.segment_len)),
+            dim=1,
+        )
 
-            # Extract segment from input
-            x_seg = x[:, ix_lo:ix_hi, :]
-
+        for segment in segments:
+            segment_len = segment.shape[1]
             # Project the input tensor to get the key, value, and query tensors
-            k = self.proj_k(x_seg).unsqueeze(1).view((batch_size, self.num_heads, self.segment_len, self.dim_key))
-            v = self.proj_v(x_seg).unsqueeze(1).view((batch_size, self.num_heads, self.segment_len, self.dim_value))
-            q = self.proj_q(x_seg).unsqueeze(1).view((batch_size, self.num_heads, self.segment_len, self.dim_key))
+            k = self.proj_k(segment).unsqueeze(1).view((batch_size, self.num_heads, segment_len, self.dim_key))
+            v = self.proj_v(segment).unsqueeze(1).view((batch_size, self.num_heads, segment_len, self.dim_value))
+            q = self.proj_q(segment).unsqueeze(1).view((batch_size, self.num_heads, segment_len, self.dim_key))
 
             # Pre-calculate sigma(q) for updating memory and calculating attention
             sigma_q = (nn.functional.elu(q) + 1.0) # shape: (batch_size, num_heads, segment_len, dim_key)
@@ -100,7 +101,7 @@ class CompressiveMemory(nn.Module):
 
             # Calculate weighted average of dot-product and memory-based attention
             att = nn.functional.sigmoid(self.betas) * att_mem + (1 - nn.functional.sigmoid(self.betas)) * att_dot
-            att = att.view((batch_size, self.segment_len, self.num_heads * self.dim_value))
+            att = att.view((batch_size, segment_len, self.num_heads * self.dim_value))
 
             # Append output to buffer
             out.append(self.proj_out(att))

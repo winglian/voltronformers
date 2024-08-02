@@ -269,6 +269,7 @@ class TransformerDecoderBlock(nn.Module):
 
     def __init__(self, config, is_mod_wrapped=False):
         super().__init__()
+        self.config = config
         if config.infini_attention:
             if is_mod_wrapped:
                 seq_len = min(config.ia_segment_len, int(config.max_position_embeddings * config.mod_capacity_factor))
