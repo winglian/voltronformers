@@ -288,7 +288,7 @@ class TransformerDecoderBlock(nn.Module):
         self.input_layernorm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.post_attention_layernorm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
 
-    @torch.compile()
+    # @torch.compile()
     def forward(self, x, position_ids, cached_kv_iter, past_memories_iter, return_new_memories=False):
         residual = x
         h = self.input_layernorm(x)
@@ -340,7 +340,7 @@ class Transformer(nn.Module):
         # tie weights
         self.wte.weight = self.embed_out.weight
 
-    @torch.compile()
+    # @torch.compile()
     def forward(self,
                 x,
                 position_ids: Tensor,
@@ -482,7 +482,7 @@ class VoltronformerWrapper(nn.Module):
         self.train(train_state)
         return out
 
-    @torch.compile()
+    # @torch.compile()
     def forward(
             self,
             seq,

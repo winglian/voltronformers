@@ -9,20 +9,22 @@ import torch
 import wandb
 from accelerate import Accelerator, PartialState, DistributedDataParallelKwargs
 from datasets import load_dataset
-from safetensors.torch import save_model
 from schedulefree import AdamWScheduleFree
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 from transformers import AutoTokenizer, DataCollatorForSeq2Seq
 from transformers.trainer_pt_utils import distributed_concat
 
-from src.voltronformer.config import teeny, tiny, small
+from src.voltronformer.config import teeny, tiny, smol, small
 from src.voltronformer.model import TransformerDecoderBlock, VoltronformerWrapper
 from src.voltronformer.train.data import wrap_pretraining_dataset, QueuedDataLoader
 from src.voltronformer.utils import device_get_cuda, device_get_local_rank, set_activation_checkpointing
 
 
 state = PartialState()
+os.environ[
+    "PYTORCH_CUDA_ALLOC_CONF"
+] = "expandable_segments:True,roundup_power2_divisions:16"
 
 @dataclass
 class TrainingArguments:
@@ -260,7 +262,7 @@ def main():
             ds_wrapper_partial,
             max_tokens=args.max_sequence_length,
             batch_size=args.per_gpu_train_batch_size,
-            buffer_size=40_000,
+            buffer_size=100_000,
         )
         # https://discuss.huggingface.co/t/how-to-use-huggingface-trainer-streaming-datasets-without-wrapping-it-with-torchdatas-iterablewrapper/25230
         train_dataset = train_dataset.with_format("torch")
