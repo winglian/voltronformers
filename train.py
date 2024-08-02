@@ -175,6 +175,9 @@ class Trainer:
         self.accelerator.end_training()
 
 
+def get_fineweb_edu():
+    return load_dataset("HuggingFaceFW/fineweb-edu", "sample-350BT", split="train", streaming=True), "text"
+
 def get_redpajama_v1():
     return load_dataset("togethercomputer/RedPajama-Data-1T", "common_crawl", split="train", streaming=True), "text"
 
@@ -196,7 +199,7 @@ def get_ds(dispatch_batches):
     when using dispatch_batches
     """
     if state.is_main_process or not dispatch_batches:
-        return get_redpajama_v2()
+        return get_fineweb_edu()
     else:
         with tempfile.NamedTemporaryFile(mode="w+", delete=True) as f:
             f.write("text\n")
