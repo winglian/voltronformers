@@ -1,7 +1,11 @@
 import functools
-from typing import Optional, Callable, Tuple
+from typing import Optional, Callable, Tuple, List
 
 import torch
+import torch.nn.functional as F
+from einops import pack
+from tqdm import tqdm
+
 from .bitlinear import BitLinear, scaled_dot_product_gqa
 
 from functorch.einops import rearrange
@@ -10,6 +14,9 @@ from denseformer import DWAModules
 from torch.utils.checkpoint import checkpoint
 from transformers.models.llama.modeling_llama import LlamaRotaryEmbedding
 
+from .infini_transformer.modeling import CausalAttention, FeedForward, Memories, exists, default, detach_cached_kv_, \
+    TransformerReturn, detach_memories_
+from .infini_transformer.wrapper import top_p, round_down_multiple, divisible_by, gumbel_sample
 from .mod import MoDBlock
 from .infini_attention import CompressiveMemory as InfiniAttention
 
@@ -50,29 +57,29 @@ def apply_rotary_pos_emb(q, k, cos, sin, unsqueeze_dim=1):
     return q_embed, k_embed
 
 
-class FeedForward(nn.Module):
-    def __init__(self, gate_proj: BitLinear, down_proj: BitLinear, up_proj: BitLinear):
-        super().__init__()
-        self.gate_proj = gate_proj
-        self.down_proj = down_proj
-        self.up_proj = up_proj
-        self.act_fn = nn.SiLU()
+# class FeedForward(nn.Module):
+#     def __init__(self, gate_proj: BitLinear, down_proj: BitLinear, up_proj: BitLinear):
+#         super().__init__()
+#         self.gate_proj = gate_proj
+#         self.down_proj = down_proj
+#         self.up_proj = up_proj
+#         self.act_fn = nn.SiLU()
+#
+#     def forward(self, x):
+#         x = self.act_fn(self.gate_proj(x)) * self.up_proj(x)
+#         # FIXME layernorm???
+#         x = self.down_proj(x)
+#         return x
 
-    def forward(self, x):
-        x = self.act_fn(self.gate_proj(x)) * self.up_proj(x)
-        # FIXME layernorm???
-        x = self.down_proj(x)
-        return x
 
-
-def mlp(dim: int, hidden_dim: int) -> FeedForward:
-    """
-    Build the MLP layer associated with the Llama model.
-    """
-    gate_proj = BitLinear(dim, hidden_dim, bias=False)
-    down_proj = BitLinear(hidden_dim, dim, bias=False)
-    up_proj = BitLinear(dim, hidden_dim, bias=False)
-    return FeedForward(gate_proj=gate_proj, down_proj=down_proj, up_proj=up_proj)
+# def mlp(dim: int, hidden_dim: int, dropout: float = 0.0) -> FeedForward:
+#     """
+#     Build the MLP layer associated with the Llama model.
+#     """
+#     gate_proj = BitLinear(dim, hidden_dim, bias=False)
+#     down_proj = BitLinear(hidden_dim, dim, bias=False)
+#     up_proj = BitLinear(dim, hidden_dim, bias=False)
+#     return FeedForward(gate_proj=gate_proj, down_proj=down_proj, up_proj=up_proj)
 
 
 # copied from https://github.com/kyegomez/BitNet/blob/main/bitnet/bit_attention.py
@@ -270,39 +277,28 @@ class TransformerDecoderBlock(nn.Module):
     def __init__(self, config, is_mod_wrapped=False):
         super().__init__()
         self.config = config
-        if config.infini_attention:
-            if is_mod_wrapped:
-                seq_len = min(config.ia_segment_len, int(config.max_position_embeddings * config.mod_capacity_factor))
-            else:
-                seq_len = config.ia_segment_len
-            self.attn = InfiniAttention(
-                config.hidden_size,
-                config.ia_dim_key,
-                config.ia_dim_value,
-                config.num_attention_heads,
-                seq_len,
-                update="linear",
-            )
-        else:
-            self.attn = LlamaBitMGQA(
-                config.hidden_size,
-                config.num_attention_heads,
-                config.num_key_value_heads,
-                max_position_embeddings=config.max_position_embeddings,
-                rope_theta=config.rope_theta,
-                bias=False,
-                layer_norm=False,
-            )
-
-        self.mlp = mlp(config.hidden_size, config.intermediate_size)
+        self.attn = CausalAttention(
+            dim = config.hidden_size,
+            dim_head = config.ia_dim_head,
+            heads = config.num_attention_heads,
+            use_mem_delta_rule = config.ia_delta_rule,
+            dropout = config.dropout,
+        )
+        self.mlp = FeedForward(config.hidden_size, dropout=config.dropout)
         self.input_layernorm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.post_attention_layernorm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
 
-    def forward(self, x, position_ids):
+    def forward(self, x, position_ids, cached_kv_iter, past_memories_iter, return_new_memories=False):
         residual = x
         h = self.input_layernorm(x)
-        output = residual + self.attn(h, position_ids=position_ids)[0]
-        return residual + self.mlp(self.post_attention_layernorm(output))
+        attn_out, layer_cached_kv, layer_new_memories = self.attn(
+            h,
+            cached_kv = next(cached_kv_iter, None),
+            past_memories = next(past_memories_iter, None),
+            return_new_memories = return_new_memories
+        )
+        h  = residual + attn_out
+        return self.mlp(self.post_attention_layernorm(h)) + h, layer_cached_kv, layer_new_memories
 
 
 class CheckpointingMixin(nn.Module):
@@ -319,8 +315,8 @@ class CheckpointingMixin(nn.Module):
             self.gradient_checkpointing = enable
 
 
-class Transformer(CheckpointingMixin):
-    supports_gradient_checkpointing = True
+class Transformer(nn.Module):
+    supports_gradient_checkpointing = False
 
     def __init__(self, config):
         super().__init__()
@@ -338,54 +334,232 @@ class Transformer(CheckpointingMixin):
             for i in range(config.num_hidden_layers)
         ])
         self.ln_f = RMSNorm(config.hidden_size, eps=1e-6)
+        self.embed_out = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
         self.gradient_checkpointing = False
+        # tie weights
+        self.wte.weight = self.embed_out.weight
 
-    def forward(self, x):
+    def forward(self,
+                x,
+                position_ids: Tensor,
+                past_memories: List[Memories] | None = None,
+                cached_kv: List[Tensor] | None = None,
+                return_new_memories = False,
+                detach_memories = False
+            ):
         inputs_embeds = self.wte(x)
-        past_seen_tokens = 0
-        position_ids = torch.arange(
-            past_seen_tokens, past_seen_tokens + inputs_embeds.shape[1], device=inputs_embeds.device
-        ).unsqueeze(0)
-
+        # past_seen_tokens = 0
+        # position_ids = torch.arange(
+        #     past_seen_tokens, past_seen_tokens + inputs_embeds.shape[1], device=inputs_embeds.device
+        # ).unsqueeze(0)
         hidden_states = inputs_embeds
+
+        # handle cached key values
+        if exists(cached_kv):
+            hidden_states = hidden_states[:, -1:]
+
+        new_cached_kv = []
+        cached_kv_iter = iter(default(cached_kv, []))
+
+        # iterator for past compressed memories
+
+        new_memories = []
+        past_memories_iter = iter(default(past_memories, []))
+
         if self.config.dwa:
             self.dwa_modules.init_accumulators(hidden_states)
         for i, decoder_layer in enumerate(self.h):
             # gradient checkpointing
-            if self.gradient_checkpointing and self.training:
-                hidden_states = self._gradient_checkpointing_func(
-                    decoder_layer,
-                    hidden_states,
-                    position_ids,
-                )
-            else:
-                hidden_states = decoder_layer(hidden_states, position_ids)
+            hidden_states, layer_cached_kv, layer_new_memories = decoder_layer(
+                hidden_states,
+                position_ids,
+                cached_kv_iter,
+                past_memories_iter,
+                return_new_memories,
+            )
+            new_cached_kv.append(layer_cached_kv)
+            new_memories.append(layer_new_memories)
+
             if self.config.dwa:
                 hidden_states = self.dwa_modules(hidden_states, block_idx=i)
         hidden_states = self.ln_f(hidden_states)
-        return hidden_states
+        logits = self.embed_out(hidden_states)
+
+        if detach_memories:
+            detach_cached_kv_(new_cached_kv)
+
+        if not return_new_memories:
+            return TransformerReturn(logits, new_cached_kv, past_memories)
+
+        if detach_memories:
+            detach_memories_(new_memories)
+
+        return TransformerReturn(logits, None, new_memories)
 
 
-class CausalLM(nn.Module):
-    def __init__(self, config):
+class VoltronformerWrapper(nn.Module):
+    def __init__(
+            self,
+            config,
+    ):
         super().__init__()
-        self.transformer = Transformer(config)
-        self.vocab_size = config.vocab_size
-        # should this use a BitLinear layer?
-        self.embed_out = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
-        # tie weights
-        self.transformer.wte.weight = self.embed_out.weight
+        self.config = config
+        self.model = Transformer(config)
 
-    def forward(self, x):
-        x = self.transformer(x)
-        logits = self.embed_out(x)
+        self.segment_length = config.segment_length
+        self.detach_mems_every_num_segments = 2
 
-        return logits.float()
+        # loss related
+        self.ignore_index = -100
 
-    def train(self, mode: bool = True):
-        """
-        Override the default train() to enable gradient checkpointing.
-        """
-        if mode:
-            self.transformer.gradient_checkpointing_enable()
-        return super().train(mode)
+    @property
+    def device(self):
+        return next(self.model.parameters()).device
+
+    @torch.no_grad()
+    def generate(
+            self,
+            *,
+            seq_len,
+            prompt = None,
+            batch_size = 1,
+            temperature = 1.,
+            filter_fn: Callable = top_p,
+            filter_kwargs: dict = dict(thres = 0.9),
+            exclude_prompt = True,
+            segment_length = None
+    ):
+        segment_length = default(segment_length, self.segment_length)
+        device, train_state = self.device, self.training
+        self.eval()
+
+        out = default(prompt, torch.empty((batch_size, 0), device = device, dtype = torch.long))
+        init_len = out.shape[-1]
+
+        # sample from the model token by token
+        # keeping track of kv cache and when to compress into new memories
+
+        cached_kv = None
+        past_memories = None
+
+        for curr_len in tqdm(range(init_len, seq_len)):
+
+            # what is fed into the model is always at the start of the very last segment
+
+            start_ind = round_down_multiple(curr_len - 1, segment_length)
+            model_input = out[:, start_ind:]
+
+            # forward the model with cached key / values and past memories
+
+            logits, cached_kv, past_memories = self.model(
+                model_input,
+                cached_kv = cached_kv,
+                past_memories = past_memories,
+                return_new_memories = divisible_by(curr_len, segment_length)
+            )
+
+            # grab the last logit
+
+            logits = logits[:, -1]
+
+            # filter by either topk or nucleus
+            # and sample
+
+            filtered_logits = filter_fn(logits, **filter_kwargs)
+            sampled = gumbel_sample(filtered_logits, temperature = temperature)
+
+            # concat sampled token
+
+            out, _ = pack((out, sampled), 'b *')
+
+        # return output
+
+        if exclude_prompt:
+            out = out[:, init_len:]
+
+        self.train(train_state)
+        return out
+
+    def forward(
+            self,
+            seq,
+            label,
+    ):
+        segment_length = self.segment_length
+        backward = self.training
+        grad_accum_scale = 1.
+
+        seq = seq[:, :-1]
+        label = label[:, 1:]
+
+        past_seen_tokens = 0
+        position_ids = torch.arange(
+            past_seen_tokens, past_seen_tokens + seq.shape[1], device=seq.device
+        )
+
+        total_tokens = (label != self.ignore_index).sum().item()
+
+        # split the sequence by segment length
+
+        split_seq = seq.split(segment_length, dim = -1)
+        split_label = label.split(segment_length, dim = -1)
+        split_position_ids = position_ids.split(segment_length, dim = -1)
+
+        num_segments = len(split_seq)
+
+        # go over each segment length and calculate cross entropy loss
+
+        total_loss = 0.
+        past_memories = None
+
+        running_loss = 0.
+
+        for ind, (segment_seq, segment_label, segment_position_ids) in enumerate(zip(split_seq, split_label, split_position_ids)):
+            segment_num = ind + 1
+            is_last = segment_num == num_segments
+
+            should_detach_memories = divisible_by(segment_num, self.detach_mems_every_num_segments)
+            should_backward = backward and (is_last or should_detach_memories)
+
+            # model forwards for logits and past memories
+
+            logits, _, past_memories = self.model(
+                segment_seq,
+                segment_position_ids,
+                past_memories = past_memories,
+                return_new_memories = True
+            )
+
+            # calculate cross entropy loss for segment
+
+            segment_loss = F.cross_entropy(
+                rearrange(logits, 'b n c -> b c n'),
+                segment_label,
+                reduction = 'none'
+            )
+
+            # make sure segment losses do not include ignored index
+            # then also make sure the segment loss is scaled
+
+            segment_mask = segment_label != self.ignore_index
+            num_segment_tokens = segment_mask.sum()
+            frac_tokens = num_segment_tokens / total_tokens
+
+            segment_loss = segment_loss[segment_mask]
+            segment_scaled_loss = segment_loss.mean() * frac_tokens
+
+            total_loss = total_loss + segment_scaled_loss
+            running_loss = running_loss + segment_scaled_loss
+
+            # perform backwards every `(num_segment * detach_mems_every_num_segments)`
+
+            if should_backward:
+                (running_loss / grad_accum_scale).backward()
+                running_loss = 0.
+
+            # detach memories if need be
+
+            if should_detach_memories and not is_last:
+                detach_memories_(past_memories)
+
+        return total_loss

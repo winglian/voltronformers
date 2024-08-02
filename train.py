@@ -45,7 +45,7 @@ class TrainingArguments:
 
 
 class Trainer:
-    def __init__(self, model, args, dataloader, accelerator, activation_checkpointing=True):
+    def __init__(self, model, args, dataloader, accelerator, activation_checkpointing=False):
         self.args = args
         self._model = model
         if activation_checkpointing:
@@ -113,7 +113,7 @@ class Trainer:
                 else:
                     labels = input_ids.clone()
 
-                logits = self._model(input_ids)
+                logits = self._model(input_ids, labels)
 
                 # Shift so that tokens < n predict n
                 shift_logits = logits[..., :-1, :].contiguous()
@@ -232,7 +232,7 @@ def main():
     os.makedirs(args.output_dir, exist_ok=True)
 
     model = CausalLM(config)
-    tokenizer = AutoTokenizer.from_pretrained("mistralai/Mistral-7B-v0.1")
+    tokenizer = AutoTokenizer.from_pretrained("mistralai/Mistral-Nemo-Instruct-2407")
     if not tokenizer.pad_token_id:
         tokenizer.pad_token_id = tokenizer.eos_token_id
 

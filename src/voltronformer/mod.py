@@ -13,7 +13,7 @@ class MoDBlock(nn.Module):
         self.router_in = nn.Linear(config.hidden_size, config.hidden_size * 2, bias=False)
         self.router_out = nn.Linear(config.hidden_size * 2, 1, bias=False)
         self.capacity_factor = config.mod_capacity_factor
-        self.top_k = int(self.capacity_factor * config.max_position_embeddings)
+        self.top_k = int(self.capacity_factor * config.ia_segment_length)
 
     def forward(self, x, position_ids, **kwargs):
         # [batch_size, sequence_length, n_embd]

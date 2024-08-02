@@ -11,7 +11,7 @@ def teeny():
         "num_attention_heads": 16,
         "num_key_value_heads": 4,
         "num_hidden_layers": 12,
-        "vocab_size": 32000,
+        "vocab_size": 131072,
         "dwa_dilation": 4,
         "dwa_period": 5,
         "pad_token_id": 2,
@@ -20,9 +20,9 @@ def teeny():
         "rms_norm_eps": 0.000001,
         "dwa": True,
         "infini_attention": True,
-        "ia_segment_len": 512,  # needs to be evenly divide max_position_embeddings * mod_capacity_factor
-        "ia_dim_key": 64,
-        "ia_dim_value": 64,
+        "ia_dim_head": 64,
+        "ia_delta_rule": False,
+        "dropout": 0.1,
     })
 
 
@@ -36,7 +36,7 @@ def tiny():
         "num_attention_heads": 32,
         "num_key_value_heads": 8,
         "num_hidden_layers": 24,
-        "vocab_size": 32000,
+        "vocab_size": 131072,
         "dwa_dilation": 4,
         "dwa_period": 5,
         "pad_token_id": 2,
@@ -44,7 +44,10 @@ def tiny():
         "mod_capacity_factor": 0.125,
         "rms_norm_eps": 0.000001,
         "dwa": True,
-        "infini_attention": False,
+        "infini_attention": True,
+        "ia_dim_head": 64,
+        "ia_delta_rule": False,
+        "dropout": 0.1,
     })
 
 
@@ -58,7 +61,7 @@ def small():
         "num_attention_heads": 32,
         "num_key_value_heads": 8,
         "num_hidden_layers": 24,
-        "vocab_size": 32000,
+        "vocab_size": 131072,
         "dwa_dilation": 4,
         "dwa_period": 5,
         "pad_token_id": 2,
@@ -66,5 +69,9 @@ def small():
         "mod_capacity_factor": 0.125,
         "rms_norm_eps": 0.000001,
         "dwa": True,
-        "infini_attention": False,
+        "infini_attention": True,
+        "ia_segment_length": 512,
+        "ia_dim_head": 128,
+        "ia_delta_rule": True,
+        "dropout": 0.1,
     })
