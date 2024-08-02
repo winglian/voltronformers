@@ -17,7 +17,7 @@ from transformers import AutoTokenizer, DataCollatorForSeq2Seq
 from transformers.trainer_pt_utils import distributed_concat
 
 from src.voltronformer.config import teeny, tiny, small
-from src.voltronformer.model import CausalLM, TransformerDecoderBlock
+from src.voltronformer.model import TransformerDecoderBlock, VoltronformerWrapper
 from src.voltronformer.train.data import wrap_pretraining_dataset, QueuedDataLoader
 from src.voltronformer.utils import device_get_cuda, device_get_local_rank, set_activation_checkpointing
 
@@ -113,6 +113,9 @@ class Trainer:
                 else:
                     labels = input_ids.clone()
 
+                loss = self._model(input_ids, labels)
+
+                """
                 logits = self._model(input_ids, labels)
 
                 # Shift so that tokens < n predict n
@@ -128,6 +131,7 @@ class Trainer:
                 if self.args.n_gpu > 1:
                     loss = loss.mean()
                 self.accelerator.backward(loss)
+                """
                 mini_step_loss = loss.detach() / self.args.gradient_accumulation_steps
                 tr_loss += mini_step_loss
 
@@ -208,7 +212,7 @@ def main():
     torch.backends.cuda.matmul.allow_tf32 = True
     torch.backends.cudnn.allow_tf32 = True
 
-    config = teeny()
+    config, model_config = teeny()
     dispatch_batches = True
 
     ds, text_field = get_ds(dispatch_batches)
@@ -223,7 +227,7 @@ def main():
         warmup_steps=1000,
         per_gpu_train_batch_size=10,
         save_steps=1000,
-        max_sequence_length=config.max_position_embeddings,
+        max_sequence_length=model_config.max_position_embeddings,
         learning_rate=1e-4,
         vocab_size=config.vocab_size,
         n_gpu=state.num_processes,
@@ -231,13 +235,13 @@ def main():
     )
     os.makedirs(args.output_dir, exist_ok=True)
 
-    model = CausalLM(config)
-    tokenizer = AutoTokenizer.from_pretrained("mistralai/Mistral-Nemo-Instruct-2407")
+    model = VoltronformerWrapper(model_config)
+    tokenizer = AutoTokenizer.from_pretrained(config.tokenizer_name)
     if not tokenizer.pad_token_id:
         tokenizer.pad_token_id = tokenizer.eos_token_id
 
     def tokenize_function(examples, field="text", tokenizer=None):
-        outputs = tokenizer(examples[field], truncation=True, max_length=config.max_position_embeddings)
+        outputs = tokenizer(examples[field], truncation=True, max_length=model_config.max_position_embeddings)
         return outputs
 
     with state.main_process_first():
@@ -299,7 +303,7 @@ def main():
                 # module.weight.to(torch.float8_e4m3fn)
                 pass
 
-    trainer = Trainer(model, args, dataloader, accelerator, activation_checkpointing=True)
+    trainer = Trainer(model, args, dataloader, accelerator, activation_checkpointing=False)
     if state.is_main_process:
         print(f"Total number of parameters: {trainer.model_num_parameters:_}")
     trainer.train()

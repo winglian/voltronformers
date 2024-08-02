@@ -18,9 +18,11 @@ dependencies = [
     "safetensors",
     "wandb",
     "tqdm",
-    "transformers==4.39.3",
+    "transformers",
     "zstandard",
     "denseformer @ git+https://github.com/epfml/DenseFormer.git@main",
+    "rotary-embedding-torch>=0.6.0",
+    "bitmat-tl",
 ]
 maintainers = [
     {name="Wing Lian", email="wing.lian@gmail.com"},

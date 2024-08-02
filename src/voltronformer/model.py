@@ -406,7 +406,7 @@ class VoltronformerWrapper(nn.Module):
         self.config = config
         self.model = Transformer(config)
 
-        self.segment_length = config.segment_length
+        self.segment_length = config.ia_segment_length
         self.detach_mems_every_num_segments = 2
 
         # loss related

@@ -61,7 +61,7 @@ class FeedForward(Module):
             dropout = 0.
     ):
         super().__init__()
-        dim_inner = int(mult * dim * 2 / 3)
+        dim_inner = 4 * (int(mult * dim * 2 / 3) // 4)
 
         self.norm = RMSNorm(dim)
         self.proj_in = BitLinear(dim, dim_inner * 2)

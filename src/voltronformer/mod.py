@@ -15,7 +15,7 @@ class MoDBlock(nn.Module):
         self.capacity_factor = config.mod_capacity_factor
         self.top_k = int(self.capacity_factor * config.ia_segment_length)
 
-    def forward(self, x, position_ids, **kwargs):
+    def forward(self, x, position_ids, *args, **kwargs):
         # [batch_size, sequence_length, n_embd]
         B, T, C = x.shape
 
@@ -23,13 +23,13 @@ class MoDBlock(nn.Module):
         # inference time optimization: sequence length can
         # be smaller than seq len during training
         if T <= self.top_k:
-            return self.block(x, position_ids, **kwargs)
+            return self.block(x, position_ids, *args, **kwargs)
 
         top_k = min(self.top_k, int(self.capacity_factor * T))
 
         """STEP 1: get logits and top_k tokens"""
         # [batch_size, sequence_length, 1]
-        router_logits = self.route_out(self.router_in(x))
+        router_logits = self.router_out(self.router_in(x))
         # weights and selected tokens: [batch_size, top_k, 1]
         weights, selected_tokens = torch.topk(router_logits, top_k, dim=1, sorted=False)
         # IMPORTANT: need to sort indices to keep causal order for those tokens that
@@ -43,7 +43,7 @@ class MoDBlock(nn.Module):
         indices_expanded = selected_tokens.expand(-1, -1, C)
         # [batch_size, top_k, n_embd]
         top_k_tokens = torch.gather(x, 1, indices_expanded)
-        top_k_tokens_processed = self.block(top_k_tokens, position_ids, **kwargs)
+        top_k_tokens_processed, layer_cached_kv, layer_new_memories = self.block(top_k_tokens, position_ids, *args, **kwargs)
 
         """STEP 3: combine results"""
         x = torch.scatter_add(
@@ -53,4 +53,4 @@ class MoDBlock(nn.Module):
             src=top_k_tokens_processed * weights,
         )
 
-        return x
+        return x, layer_cached_kv, layer_new_memories
