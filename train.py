@@ -283,7 +283,7 @@ def main():
         batch_size=args.per_gpu_train_batch_size,
         num_workers=1,
         pin_memory=True,
-        prefetch_factor=2_000,
+        prefetch_factor=10_000,
         drop_last=True,
         collate_fn=DataCollatorForSeq2Seq(tokenizer=tokenizer, max_length=True),
     )
