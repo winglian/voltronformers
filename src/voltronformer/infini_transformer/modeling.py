@@ -71,6 +71,7 @@ class FeedForward(Module):
 
         self.dropout = nn.Dropout(dropout)
 
+    @torch.compile()
     def forward(self, x):
         x = self.norm(x)
         x, gates = self.proj_in(x).chunk(2, dim = -1)
@@ -191,6 +192,7 @@ class CausalAttention(Module):
             use_mem_delta_rule = use_mem_delta_rule
         )
 
+    @torch.compile()
     def forward(
             self,
             x,
