@@ -284,7 +284,7 @@ class TransformerDecoderBlock(nn.Module):
             use_mem_delta_rule = config.ia_delta_rule,
             dropout = config.dropout,
         )
-        self.mlp = FeedForward(config.hidden_size, dropout=config.dropout)
+        self.mlp = FeedForward(config.hidden_size, dropout=config.dropout, dim_inner=config.intermediate_size)
         self.input_layernorm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.post_attention_layernorm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
 
@@ -407,7 +407,7 @@ class VoltronformerWrapper(nn.Module):
         self.model = Transformer(config)
 
         self.segment_length = config.ia_segment_length
-        self.detach_mems_every_num_segments = 2
+        self.detach_mems_every_num_segments = config.ia_detach_mems_every_num_segments
 
         # loss related
         self.ignore_index = -100
