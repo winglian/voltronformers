@@ -4,8 +4,8 @@ from src.voltronformer.utils import DictDefault
 def teeny():
     """50M parameters"""
     return DictDefault({
-        # "tokenzizer_name": "mistralai/Mistral-Nemo-Instruct-2407",
-        "tokenzizer_name": "mistralai/Mistral-7B-v0.1",
+        # "tokenizer_name": "mistralai/Mistral-Nemo-Instruct-2407",
+        "tokenizer_name": "mistralai/Mistral-7B-v0.1",
     }), DictDefault({
         "hidden_size": 512,
         "intermediate_size": 1408,

@@ -229,7 +229,7 @@ def main():
         save_steps=1000,
         max_sequence_length=model_config.max_position_embeddings,
         learning_rate=1e-4,
-        vocab_size=config.vocab_size,
+        vocab_size=model_config.vocab_size,
         n_gpu=state.num_processes,
         bf16=True,
     )
