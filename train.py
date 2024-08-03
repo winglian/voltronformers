@@ -82,7 +82,33 @@ class Trainer:
         return all_param
 
     def build_optimizer_and_scheduler(self):
-        self.optimizer = AdamWScheduleFree(self._model.parameters(), lr=self.args.learning_rate, weight_decay=self.args.weight_decay, warmup_steps=self.args.weight_decay, eps=self.args.adam_epsilon, betas=self.args.adam_betas)
+        no_decay = ["bias", "input_layernorm.weight", "post_attention_layernorm.weight", "ln_f.weight"]
+        optimizer_grouped_parameters = [
+            {
+                "params": [
+                    p
+                    for n, p in self._model.named_parameters()
+                    if not any(nd in n for nd in no_decay)
+                ],
+                "weight_decay": self.args.weight_decay,
+            },
+            {
+                "params": [
+                    p
+                    for n, p in self._model.named_parameters()
+                    if any(nd in n for nd in no_decay)
+                ],
+                "weight_decay": 0.0,
+            },
+        ]
+        self.optimizer = AdamWScheduleFree(
+            optimizer_grouped_parameters,
+            lr=self.args.learning_rate,
+            # weight_decay=self.args.weight_decay,
+            warmup_steps=self.args.weight_decay,
+            eps=self.args.adam_epsilon,
+            betas=self.args.adam_betas,
+        )
         self.lr_scheduler = None
 
     def _loss_fn(self, logits, labels):
