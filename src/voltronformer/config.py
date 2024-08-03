@@ -6,6 +6,7 @@ def teeny():
     return DictDefault({
         # "tokenizer_name": "mistralai/Mistral-Nemo-Instruct-2407",
         "tokenizer_name": "mistralai/Mistral-7B-v0.1",
+        "learning_rate": 1e-4,
     }), DictDefault({
         "hidden_size": 512,
         "intermediate_size": 2048,
@@ -32,9 +33,10 @@ def teeny():
 
 
 def tiny():
-    """100M parameters"""
+    """500M parameters"""
     return DictDefault({
         "tokenizer_name": "mistralai/Mistral-7B-v0.1",
+        "learning_rate": 3e-4,
     }), DictDefault({
         "hidden_size": 1024,
         "intermediate_size": 4096,

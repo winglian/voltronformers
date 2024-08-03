@@ -370,7 +370,9 @@ class Transformer(nn.Module):
 
         if self.config.dwa:
             self.dwa_modules.init_accumulators(hidden_states)
-        for i, decoder_layer in enumerate(self.h):
+        # for i, decoder_layer in enumerate(self.h):
+        for i in range(self.config.num_hidden_layers):
+            decoder_layer = self.h[i]
             # gradient checkpointing
             hidden_states, layer_cached_kv, layer_new_memories = decoder_layer(
                 hidden_states,
@@ -517,7 +519,12 @@ class VoltronformerWrapper(nn.Module):
 
         running_loss = 0.
 
-        for ind, (segment_seq, segment_label, segment_position_ids) in enumerate(zip(split_seq, split_label, split_position_ids)):
+        # for ind, (segment_seq, segment_label, segment_position_ids) in enumerate(zip(split_seq, split_label, split_position_ids)):
+        for ind in range(num_segments):
+            segment_seq = split_seq[ind]
+            segment_label = split_label[ind]
+            segment_position_ids = split_position_ids[ind]
+
             segment_num = ind + 1
             is_last = segment_num == num_segments
 

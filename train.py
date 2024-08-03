@@ -217,7 +217,7 @@ def main():
     torch.backends.cuda.matmul.allow_tf32 = True
     torch.backends.cudnn.allow_tf32 = True
 
-    config, model_config = teeny()
+    config, model_config = tiny()
     dispatch_batches = True
 
     ds, text_field = get_ds(dispatch_batches)
@@ -233,7 +233,7 @@ def main():
         per_gpu_train_batch_size=10,
         save_steps=1000,
         max_sequence_length=model_config.max_position_embeddings,
-        learning_rate=1e-4,
+        learning_rate=config.learning_rate,
         vocab_size=model_config.vocab_size,
         n_gpu=state.num_processes,
         bf16=True,
@@ -262,7 +262,7 @@ def main():
             ds_wrapper_partial,
             max_tokens=args.max_sequence_length,
             batch_size=args.per_gpu_train_batch_size,
-            buffer_size=100_000,
+            buffer_size=250_000,
         )
         # https://discuss.huggingface.co/t/how-to-use-huggingface-trainer-streaming-datasets-without-wrapping-it-with-torchdatas-iterablewrapper/25230
         train_dataset = train_dataset.with_format("torch")
