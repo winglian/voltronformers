@@ -285,21 +285,17 @@ class TransformerDecoderBlock(nn.Module):
             dropout = config.dropout,
         )
         self.mlp = FeedForward(config.hidden_size, dropout=config.dropout, dim_inner=config.intermediate_size)
-        self.input_layernorm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
-        self.post_attention_layernorm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
 
     # @torch.compile()
     def forward(self, x, position_ids, cached_kv_iter, past_memories_iter, return_new_memories=False):
-        residual = x
-        h = self.input_layernorm(x)
         attn_out, layer_cached_kv, layer_new_memories = self.attn(
-            h,
+            x,
             cached_kv = next(cached_kv_iter, None),
             past_memories = next(past_memories_iter, None),
             return_new_memories = return_new_memories
         )
-        h  = residual + attn_out
-        return self.mlp(self.post_attention_layernorm(h)) + h, layer_cached_kv, layer_new_memories
+        x  = x + attn_out
+        return self.mlp(x) + x, layer_cached_kv, layer_new_memories
 
 
 class CheckpointingMixin(nn.Module):

@@ -82,7 +82,7 @@ class Trainer:
         return all_param
 
     def build_optimizer_and_scheduler(self):
-        no_decay = ["bias", "input_layernorm.weight", "post_attention_layernorm.weight", "ln_f.weight"]
+        no_decay = ["bias", "ln_f.weight", "norm.weight"]
         optimizer_grouped_parameters = [
             {
                 "params": [
